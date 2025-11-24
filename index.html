@@ -2,19 +2,119 @@
 <html>
   <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>AR básico con model-viewer</title>
     <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
+    <style>
+      /* Layout simple y responsive */
+      body { margin: 0; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Arial; background: #111; color: #eee; display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 12px; }
+      .viewer-wrap { position: relative; width: 100%; max-width: 900px; height: 60vh; min-height: 380px; }
+      model-viewer { width: 100%; height: 100%; background: transparent; }
+      /* El elemento video irá detrás del model-viewer para simular overlay AR */
+      #cameraStream { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; background: #000; }
+      model-viewer { position: absolute; inset: 0; z-index: 1; pointer-events: auto; }
+      .controls { width: 100%; max-width: 900px; display:flex; gap:8px; }
+      button { padding: 8px 12px; border-radius:6px; border: none; background:#0b84ff; color:white; font-weight:600; }
+      button.secondary { background:#666; }
+      .notice { font-size:0.9rem; color:#ddd; }
+    </style>
   </head>
   <body>
-  
-    <model-viewer src="model.glb"
-                  alt="Mi modelo 3D"
-                  ar
-                  ar-modes="webxr scene-viewer quick-look"
-                  camera-controls
-                  auto-rotate
-                  style="width:100%; max-width:800px; height:600px;">
-    </model-viewer>
-    
+
+    <h1>Visor AR (móvil)</h1>
+    <p class="notice">Pulsa "Abrir cámara" para usar la cámara trasera en dispositivos móviles. El botón <strong>Entrar AR</strong> lanzará el modo AR si el navegador lo soporta.</p>
+
+    <div class="controls">
+      <button id="openCamera">Abrir cámara (trasera)</button>
+      <button id="stopCamera" class="secondary" disabled>Detener cámara</button>
+      <button id="enterAR" class="secondary">Entrar AR</button>
+    </div>
+
+    <div class="viewer-wrap" aria-hidden="false">
+      <!-- video de la cámara (se crea dinámicamente) -->
+      <video id="cameraStream" playsinline autoplay muted></video>
+
+      <!-- model-viewer: corregir ruta al archivo .glb y mantener ar y ar-modes -->
+      <model-viewer id="mv"
+                    src="robot_shark.glb"
+                    alt="Robot Shark"
+                    ar
+                    ar-modes="webxr scene-viewer quick-look"
+                    ios-src=""
+                    camera-controls
+                    exposure="1"
+                    shadow-intensity="1"
+                    style="outline: none;">
+      </model-viewer>
+    </div>
+
+    <script>
+      // Pequeño contrato:
+      // - input: click en "Abrir cámara" -> solicita getUserMedia con facingMode: 'environment'
+      // - output: muestra video en #cameraStream y habilita detener cámara
+      // - error modes: muestra mensaje en consola y deshabilita botones si no hay getUserMedia
+
+      const openBtn = document.getElementById('openCamera');
+      const stopBtn = document.getElementById('stopCamera');
+      const enterARBtn = document.getElementById('enterAR');
+      const video = document.getElementById('cameraStream');
+      const mv = document.getElementById('mv');
+      let stream = null;
+
+      async function startCamera() {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          alert('Tu navegador no soporta getUserMedia. Prueba con Chrome/Edge/Firefox en Android o Safari en iOS (HTTPS).');
+          return;
+        }
+
+        try {
+          // Pedimos la cámara trasera en móviles. 'exact' puede fallar en algunos dispositivos => usamos 'ideal'.
+          const constraints = { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false };
+          stream = await navigator.mediaDevices.getUserMedia(constraints);
+          // Asignar al video. playsinline y muted ayudan en iOS a permitir autoplay sin interacción adicional.
+          video.srcObject = stream;
+          await video.play();
+          openBtn.disabled = true;
+          stopBtn.disabled = false;
+        } catch (err) {
+          console.error('No se pudo abrir la cámara:', err);
+          alert('No se pudo acceder a la cámara: ' + (err && err.message ? err.message : err));
+        }
+      }
+
+      function stopCamera() {
+        if (stream) {
+          stream.getTracks().forEach(t => t.stop());
+          stream = null;
+        }
+        video.pause();
+        video.srcObject = null;
+        openBtn.disabled = false;
+        stopBtn.disabled = true;
+      }
+
+      openBtn.addEventListener('click', startCamera);
+      stopBtn.addEventListener('click', stopCamera);
+
+      // Entrar en AR usando model-viewer: se intenta llamar al método enterAR() si existe.
+      enterARBtn.addEventListener('click', async () => {
+        if (mv && typeof mv.activate === 'function') {
+          // algunos builds exponen activate(); otherwise request AR via click on AR button UI
+          try { mv.enterAR(); } catch (e) { console.log('enterAR fallo', e); }
+        } else if (mv && mv.hasAttribute('ar')) {
+          // model-viewer añade su propio UI; intentamos simular click en su botón AR si existe
+          const arButton = mv.shadowRoot && mv.shadowRoot.querySelector('[slot="ar-button"]');
+          if (arButton) arButton.click();
+          else alert('AR: si tu navegador soporta WebXR/Scene Viewer, usa el icono AR del visor (si aparece).');
+        } else {
+          alert('Modo AR no disponible en este navegador.');
+        }
+      });
+
+      // Detener la cámara cuando se pierde la página (opcional)
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) stopCamera();
+      });
+    </script>
   </body>
 </html>
